@@ -73,10 +73,6 @@ namespace DefewayMultiplex
                 parta = parta.Replace("\"", "");
                 int camCount = Int32.Parse(parta);
                 Console.WriteLine("Cameras: " + camCount);
-                this.Invoke(new MethodInvoker(delegate ()
-                {
-                    label1.Text = camCount.ToString();
-                }));
                 doVisualShit(ip, camCount);
                 return camCount;
             }
@@ -110,7 +106,13 @@ namespace DefewayMultiplex
 
             string defewaylocation1 = "/cgi-bin/snapshot.cgi?chn=";
             string defewaylocation2 = "&u=admin&p=";
-            for (int i = 0; i < camcnt; i++){
+
+            int failedSnaps = 0;
+
+            bool saveImageFile = true;
+
+            for (int i = 0; i < camcnt; i++)
+            {
                 try
                 {
                     byte[] imgbytes = dl.DownloadData(ip + defewaylocation1 + i + defewaylocation2);
@@ -119,22 +121,33 @@ namespace DefewayMultiplex
                     snaps.Add(cur);
                     this.Invoke(new MethodInvoker(delegate ()
                     {
-                        listBox1.Items.Insert(0, "Got snap " + i);
+                        listBox1.Items.Insert(0, "Got snap " + (i + 1));
                     }));
                 }
-                catch
+                catch (WebException e)
                 {
                     this.Invoke(new MethodInvoker(delegate ()
                     {
-                        listBox1.Items.Insert(0, "No cam on " + i);
+                        listBox1.Items.Insert(0, "Failed snap " + (i + 1));
+                        failedSnaps++;
                     }));
                 }
+            }
+
+            if (failedSnaps == camcnt)
+            {
+                saveImageFile = false;
+                this.Invoke(new MethodInvoker(delegate ()
+                {
+                    listBox1.Items.Insert(0, "Credentials likely incorrect.");
+                    listBox1.Items.Insert(0, "All cams failed. Discarding.");
+                }));
             }
 
             int len = 640;
             int hei = 360;
 
-            foreach(Image i in snaps)
+            foreach (Image i in snaps)
             {
                 snapsbuffer.Add(new Bitmap(i, new Size(len, hei)));
             }
@@ -168,7 +181,7 @@ namespace DefewayMultiplex
             Graphics gr = Graphics.FromImage(canvas);
             gr.FillRectangle(Brushes.Gray, 0, 0, canvas.Width, canvas.Height);
             int count = 0;
-            foreach(Bitmap img in snaps)
+            foreach (Bitmap img in snaps)
             {
                 gr.DrawImage(img, allSnaPositions[count]);
                 count++;
@@ -180,15 +193,16 @@ namespace DefewayMultiplex
             RectangleF rect = new RectangleF(Pointvar, size);
             gr.FillRectangle(Brushes.Black, rect);
             gr.DrawString(ip, lucFont, Brushes.White, Pointvar);
-            string filename = RandomString(5);
-            canvas.Save(selectedDirectory + "/" + filename + ".png");
-            pictureBox1.Image = canvas;
-            this.Invoke(new MethodInvoker(delegate ()
+            string filename = RandomString(10);
+            if (saveImageFile)
             {
-                listBox1.Items.Insert(0, "Saved.");
-            }));
-
-
+                canvas.Save(selectedDirectory + "/" + filename + ".png");
+                pictureBox1.Image = canvas;
+                this.Invoke(new MethodInvoker(delegate ()
+                {
+                    listBox1.Items.Insert(0, "Saved.");
+                }));
+            }
         }
 
         public static Random random = new Random();
