@@ -106,13 +106,7 @@ namespace DefewayMultiplex
 
             string defewaylocation1 = "/cgi-bin/snapshot.cgi?chn=";
             string defewaylocation2 = "&u=admin&p=";
-
-            int failedSnaps = 0;
-
-            bool saveImageFile = true;
-
-            for (int i = 0; i < camcnt; i++)
-            {
+            for (int i = 0; i < camcnt; i++){
                 try
                 {
                     byte[] imgbytes = dl.DownloadData(ip + defewaylocation1 + i + defewaylocation2);
@@ -124,7 +118,7 @@ namespace DefewayMultiplex
                         listBox1.Items.Insert(0, "Got snap " + (i + 1));
                     }));
                 }
-                catch (WebException e)
+                catch
                 {
                     this.Invoke(new MethodInvoker(delegate ()
                     {
@@ -135,6 +129,16 @@ namespace DefewayMultiplex
             }
 
             if (failedSnaps == camcnt)
+            {
+                saveImageFile = false;
+                this.Invoke(new MethodInvoker(delegate ()
+                {
+                    listBox1.Items.Insert(0, "Credentials likely incorrect.");
+                    listBox1.Items.Insert(0, "All cams failed. Discarding.");
+                }));
+            }
+
+            if(failedSnaps == camcnt)
             {
                 saveImageFile = false;
                 this.Invoke(new MethodInvoker(delegate ()
