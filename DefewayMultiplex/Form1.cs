@@ -22,9 +22,30 @@ namespace DefewayMultiplex
         public List<String> ips = new List<String> { };
         public string selectedDirectory = "";
 
+        public string defewaylocation1 = "/cgi-bin/snapshot.cgi?chn=";
+        public string defewaylocation2 = "&u=admin&p=";
+
+        public string avtechlocation = "/cgi-bin/guest/Video.cgi?media=JPEG";
+
+        public string title = "Defeway multiplexer";
+        public string status = "idle";
+
+        public int completed = 0;
+        public int total = 0;
+
         public Form1()
         {
             InitializeComponent();
+        }
+
+        public class MyWebClient : WebClient
+        {
+            protected override WebRequest GetWebRequest(Uri address)
+            {
+                var req = base.GetWebRequest(address);
+                req.Timeout = 2500;
+                return req;
+            }
         }
 
         private void Form1_Load(object sender, EventArgs e)
@@ -32,12 +53,28 @@ namespace DefewayMultiplex
 
         }
 
-        public int getCamCount(string ipi)
+        public void setTitle()
+        {
+            if(completed > 0)
+            {
+                status = completed + "/" + total;
+            }
+            else
+            {
+                status = "idle";
+            }
+
+            this.Text = title + " | " + status;
+        }
+
+        public int getCamCount(string ipi, bool isAvtechMode)
         {
             string ip;
 
             this.Invoke(new MethodInvoker(delegate ()
             {
+                completed++;
+                setTitle();
                 listBox1.Items.Insert(0, "Testing: " + ipi);
             }));
 
@@ -58,23 +95,67 @@ namespace DefewayMultiplex
 
             if (reply.Status == IPStatus.Success)
             {
-                this.Invoke(new MethodInvoker(delegate ()
+                if (!isAvtechMode)
                 {
-                    listBox1.Items.Insert(0, "Ping success.");
-                }));
-                string data = "/cgi-bin/gw.cgi?xml=<juan%20ver=\"0\"><devinfo%20camcnt=\"\"/></juan>";
-                WebClient w = new WebClient();
-                byte[] dataByte = w.DownloadData(ip + data);
-                string str = System.Text.Encoding.Default.GetString(dataByte);
-                string[] parts = str.Split('\n');
-                string parta = parts[1].Substring(20);
-                parta = parta.Replace("></devinfo>", "");
-                parta = parta.Replace("camcnt=", "");
-                parta = parta.Replace("\"", "");
-                int camCount = Int32.Parse(parta);
-                Console.WriteLine("Cameras: " + camCount);
-                doVisualShit(ip, camCount);
-                return camCount;
+                    this.Invoke(new MethodInvoker(delegate ()
+                    {
+                        listBox1.Items.Insert(0, "Ping success.");
+                    }));
+                    string data = "/cgi-bin/gw.cgi?xml=<juan%20ver=\"0\"><devinfo%20camcnt=\"\"/></juan>";
+                    WebClient w = new WebClient();
+                    byte[] dataByte = w.DownloadData(ip + data);
+                    string str = System.Text.Encoding.Default.GetString(dataByte);
+                    string[] parts = str.Split('\n');
+                    string parta = parts[1].Substring(20);
+                    parta = parta.Replace("></devinfo>", "");
+                    parta = parta.Replace("camcnt=", "");
+                    parta = parta.Replace("\"", "");
+                    int camCount = Int32.Parse(parta);
+                    Console.WriteLine("Cameras: " + camCount);
+                    doVisualShit(ip, camCount, isAvtechMode);
+                    return camCount;
+                }
+                else
+                {
+                    try
+                    {
+                        this.Invoke(new MethodInvoker(delegate ()
+                        {
+                            listBox1.Items.Insert(0, "Ping success.");
+                        }));
+                        string data = "/cgi-bin/nobody/Machine.cgi?action=get_capability";
+                        WebClient w = new WebClient();
+                        w.Credentials = new NetworkCredential("admin", "admin");
+                        byte[] dataByte = w.DownloadData(ip + data);
+                        string str = System.Text.Encoding.Default.GetString(dataByte);
+                        string[] arrayItems = str.Split('\n');
+                        string camCountObject = "";
+                        foreach(string s in arrayItems)
+                        {
+                            Console.WriteLine(s);
+                            if (s.Contains("Video.Local.Input.Num"))
+                            {
+                                camCountObject = s;
+                            }
+                        }
+                        Console.WriteLine(camCountObject);
+                        string[] camCountSplitObject = camCountObject.Split('=');
+                        int camCount = Int32.Parse(camCountSplitObject[1]);
+                        doVisualShit(ip, camCount, isAvtechMode);
+                        return camCount;
+                    }
+                    catch
+                    {
+                        //remote server probably shit its self, return 4 to be safe
+                        this.Invoke(new MethodInvoker(delegate ()
+                        {
+                            listBox1.Items.Insert(0, "Failure during camcount get.");
+                        }));
+                        doVisualShit(ip, 4, isAvtechMode);
+                        return 4;
+                    }
+
+                }
             }
             else
             {
@@ -86,10 +167,9 @@ namespace DefewayMultiplex
             }
         }
 
-        public void doVisualShit(string ip, int camcnt)
+        public void doVisualShit(string ip, int camcnt, bool isAvtechMode)
         {
             //640 x 360
-
             this.Invoke(new MethodInvoker(delegate ()
             {
                 listBox1.Items.Insert(0, "Camcnt: " + camcnt);
@@ -101,15 +181,53 @@ namespace DefewayMultiplex
             }
 
             WebClient dl = new WebClient();
+            dl.Credentials = new NetworkCredential("admin", "admin");
             List<Image> snaps = new List<Image> { };
             List<Image> snapsbuffer = new List<Image> { };
 
-            string defewaylocation1 = "/cgi-bin/snapshot.cgi?chn=";
-            string defewaylocation2 = "&u=admin&p=";
+            int failedSnaps = 0;
+
+            bool saveImageFile = true;
+
+            bool shouldBreakOnLoop = false;
+
             for (int i = 0; i < camcnt; i++){
                 try
                 {
-                    byte[] imgbytes = dl.DownloadData(ip + defewaylocation1 + i + defewaylocation2);
+                    byte[] imgbytes = null;
+
+                    if (!isAvtechMode) //is Defeway
+                    {
+                        imgbytes = dl.DownloadData(ip + defewaylocation1 + i + defewaylocation2);
+                    }
+                    else //is avtech
+                    {
+                        //wack serial shit bruv
+                        try
+                        {
+                            string commandUrl = "/cgi-bin/user/Serial.cgi?action=write&device=MASTER&data=";
+                            string[] chCmdArr = { "", "37", "38", "39", "3A", "3B", "3C", "3D", "3E", "3F", "40", "41", "42", "43", "44", "45", "46" };
+                            string commandString = "02%20" + chCmdArr[i] + "%2000%2000%2023";
+                            string finalCommandIrl = commandUrl + commandString;
+                            byte[] sendCommand = dl.DownloadData(ip + finalCommandIrl);
+                            this.Invoke(new MethodInvoker(delegate ()
+                            {
+                                listBox1.Items.Insert(0, "Sent serial command.");
+                            }));
+                        }
+                        catch
+                        {
+                            this.Invoke(new MethodInvoker(delegate ()
+                            {
+                                listBox1.Items.Insert(0, "Will only download channel 0.");
+                                listBox1.Items.Insert(0, "Failed to send serial command.");
+                            }));
+                            shouldBreakOnLoop = true;
+                        }
+
+                        imgbytes = dl.DownloadData(ip + avtechlocation);
+                    }
+
                     var ms = new MemoryStream(imgbytes);
                     Image cur = Image.FromStream(ms);
                     snaps.Add(cur);
@@ -117,8 +235,13 @@ namespace DefewayMultiplex
                     {
                         listBox1.Items.Insert(0, "Got snap " + (i + 1));
                     }));
+
+                    if (shouldBreakOnLoop)
+                    {
+                        break;
+                    }
                 }
-                catch
+                catch(WebException e)
                 {
                     this.Invoke(new MethodInvoker(delegate ()
                     {
@@ -126,16 +249,6 @@ namespace DefewayMultiplex
                         failedSnaps++;
                     }));
                 }
-            }
-
-            if (failedSnaps == camcnt)
-            {
-                saveImageFile = false;
-                this.Invoke(new MethodInvoker(delegate ()
-                {
-                    listBox1.Items.Insert(0, "Credentials likely incorrect.");
-                    listBox1.Items.Insert(0, "All cams failed. Discarding.");
-                }));
             }
 
             if(failedSnaps == camcnt)
@@ -151,7 +264,7 @@ namespace DefewayMultiplex
             int len = 640;
             int hei = 360;
 
-            foreach (Image i in snaps)
+            foreach(Image i in snaps)
             {
                 snapsbuffer.Add(new Bitmap(i, new Size(len, hei)));
             }
@@ -185,7 +298,7 @@ namespace DefewayMultiplex
             Graphics gr = Graphics.FromImage(canvas);
             gr.FillRectangle(Brushes.Gray, 0, 0, canvas.Width, canvas.Height);
             int count = 0;
-            foreach (Bitmap img in snaps)
+            foreach(Bitmap img in snaps)
             {
                 gr.DrawImage(img, allSnaPositions[count]);
                 count++;
@@ -239,11 +352,8 @@ namespace DefewayMultiplex
 
         private void button1_Click(object sender, EventArgs e)
         {
-            if (checkBox1.Checked)
-            {
-                RNGCryptoServiceProvider rnd2 = new RNGCryptoServiceProvider(); //may be overdoing it a little
-                ips = ips.OrderBy(x => GetNextInt32(rnd2)).ToList();
-            }
+            radioButton1.Enabled = false;
+            radioButton2.Enabled = false;
 
             Thread a = new Thread(() => threadManager());
             a.IsBackground = true;
@@ -260,7 +370,7 @@ namespace DefewayMultiplex
                 }));
                 try
                 {
-                    getCamCount(ip);
+                    getCamCount(ip, radioButton2.Checked);
                 }
                 catch
                 {
@@ -283,6 +393,8 @@ namespace DefewayMultiplex
                 {
                     ips = System.IO.File.ReadAllLines(dlg.FileName).ToList();
                     button2.ForeColor = Color.Green;
+                    total = ips.Count();
+                    button4.Enabled = true;
                 }
             }
         }
@@ -299,6 +411,32 @@ namespace DefewayMultiplex
                     button3.ForeColor = Color.Green;
                 }
             }
+        }
+
+        private void radioButton1_CheckedChanged(object sender, EventArgs e)
+        {
+            if (radioButton1.Checked)
+            {
+                title = "Defeway multiplexer";
+                setTitle();
+            }
+        }
+
+        private void radioButton2_CheckedChanged(object sender, EventArgs e)
+        {
+            if (radioButton2.Checked)
+            {
+                title = "Avtech multiplexer";
+                setTitle();
+            }
+        }
+
+        private void button4_Click(object sender, EventArgs e)
+        {
+            RNGCryptoServiceProvider rnd2 = new RNGCryptoServiceProvider(); //may be overdoing it a little
+            int rseed = GetNextInt32(rnd2);
+            ips = ips.OrderBy(x => rseed).ToList();
+            label1.Text = "Seed: " + rseed;
         }
     }
 }
