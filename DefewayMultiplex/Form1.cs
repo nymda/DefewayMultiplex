@@ -200,6 +200,7 @@ namespace DefewayMultiplex
                     {
                         imgbytes = dl.DownloadData(ip + defewaylocation1 + i + defewaylocation2);
                     }
+
                     else //is avtech
                     {
                         //wack serial shit bruv
@@ -248,6 +249,11 @@ namespace DefewayMultiplex
                         listBox1.Items.Insert(0, "Failed snap " + (i + 1));
                         failedSnaps++;
                     }));
+
+                    if (shouldBreakOnLoop)
+                    {
+                        break;
+                    }
                 }
             }
 
